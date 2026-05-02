@@ -1,45 +1,53 @@
-import sys
+import logging
 import os
+import sys
 
-# Add parent directory to path so we can import from backend
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from backend.data_ingestion import DocumentIngestion
-from backend.vector_store import VectorStore
+from backend.data_ingestion import DocumentIngestion  # noqa: E402
+from backend.vector_store import VectorStore  # noqa: E402
 
-def main():
-    print("🚀 Starting Data Ingestion Pipeline...")
-    
-    # 1. Initialize ingestion
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+logger = logging.getLogger(__name__)
+
+# Real corpora — clone these via:
+#   git clone --depth=1 https://github.com/python/cpython.git    data/cpython
+#   git clone --depth=1 https://github.com/tiangolo/fastapi.git  data/fastapi
+#   git clone --depth=1 https://github.com/langchain-ai/langchain.git data/langchain
+DOC_PATHS = [
+    "data/cpython/Doc",
+    "data/fastapi/docs",
+    "data/langchain/docs",
+    "data/docs",  # local sample fallback
+]
+
+
+def main() -> None:
+    logger.info("Starting ingestion pipeline")
+
+    os.makedirs("data/docs", exist_ok=True)
+    sample = "data/docs/sample_doc.md"
+    if not os.path.exists(sample):
+        with open(sample, "w", encoding="utf-8") as f:
+            f.write("# Sample\nLocal sample doc for smoke testing.\n")
+
     ingestion = DocumentIngestion()
-    
-    # Define sample docs to ingest (you can modify this)
-    docs_path = "./data/docs" # Local directory
-    web_urls = [
-        "https://docs.python.org/3/tutorial/index.html",
-        "https://fastapi.tiangolo.com/"
-    ]
-    
-    # Ensure local directory exists
-    os.makedirs(docs_path, exist_ok=True)
-    
-    # Enable a simple README to be there for now
-    readme_path = os.path.join(docs_path, "sample_doc.md")
-    if not os.path.exists(readme_path):
-        with open(readme_path, "w") as f:
-            f.write("# Sample Doc\\nThis is a sample documentation file to start indexing. CodeDocsAI is cool!")
-    
-    # 2. Extract and chunk data
-    chunks = ingestion.prepare_data(docs_path, web_urls)
-    print(f"✅ Prepared {len(chunks)} document chunks.")
-    
-    # 3. Store in Vector DB
-    if chunks:
-        vector_store = VectorStore()
-        vector_store.add_documents(chunks)
-        print("✅ Data successfully ingested into Pinecone!")
-    else:
-        print("⚠️ No chunks found to ingest.")
+    chunks = ingestion.prepare_data(DOC_PATHS)
+    logger.info("Prepared %d chunks total", len(chunks))
+
+    if not chunks:
+        logger.warning("No chunks produced; nothing to ingest.")
+        return
+
+    store = VectorStore()
+    upserted = store.add_documents(chunks)
+    logger.info("Upserted %d chunks into Pinecone", upserted)
+
+    stats = store.index_stats()
+    logger.info("Pinecone index stats: %s", stats)
+    print("\nFinal index stats:")
+    print(stats)
+
 
 if __name__ == "__main__":
     main()
